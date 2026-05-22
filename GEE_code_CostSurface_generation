@@ -1,8 +1,8 @@
 // Define a central point in your study area (as X,Y WGS84 decimal degrees) and a scale,
 // just for visualisation purposes
 Map.setCenter(67.601,37.566,5);
-var geometry = ee.Geometry.Polygon([            // Whole area Silk Route
-    [26.034856936314327, 31.965400777310872],
+var geometry = ee.Geometry.Polygon([               // This area corresponds to a large part of South Asia and coincides with the raster mapping the costs of traversing loose sand.
+    [26.034856936314327, 31.965400777310872],      // Modify to fit your own study area but make sure you define a loose sand map that covers it if you inted to use this cost.
     [34.19255939893447,27.520378920323584],
     [70.85299048338345, 19.854238685800006],
     [90.28374707240327,20.074324423110866],
@@ -44,7 +44,7 @@ if (periodSel == 'dec') {var period = dec, monthNum = '11', altNum = '12', perio
 ///////////MAXIMUM COST VALUE/////////////
 
 // Assign a maximum cost value
-var maxCostPrompt = prompt('Value for the maximum cost', 40); //from this value upwards all values will be cosidered the same maximum cost. This aims to reduce the model's cost by normalising it and scaling it at a later stage.
+var maxCostPrompt = prompt('Value for the maximum cost', 40); // from this value upwards all values will be cosidered the same maximum cost. This aims to reduce the model's cost by normalising it and scaling it at a later stage.
 var maxCost = Math.round(maxCostPrompt);
 
 
@@ -83,7 +83,7 @@ var snowBase = ee.ImageCollection('MODIS/061/MOD10A1').select('NDSI_Snow_Cover')
     .reduce(ee.Reducer.mean())
     .unmask(0);
 
-var snow = snowBase.divide(33.33).add(ee.Image(1)); //This provides a maximum value of around 4 (original max. value is 100, which has been divided by 33.33 and added 1) for the study area, in line with suggested values for Pandolf et al. 1977 (in Herzog Int.Arch., 36,5)
+var snow = snowBase.divide(33.33).add(ee.Image(1)); // This provides a maximum value of around 4 (original max. value is 100, which has been divided by 33.33 and added 1) for the study area, in line with suggested values for Pandolf et al. 1977 (in Herzog Int.Arch., 36,5)
 
 
 //////////////SEA////////////
@@ -98,14 +98,14 @@ var seaMsk = bitSea.remap([0,1],[maxCost,0]);
 
 //////////////ELIMINATE RESERVOIRS////////////
 
-var maskDams = ee.FeatureCollection('users/userX/GRanD') //Global Reservoir and Dam Database (GRanD) v1.3 (2019), by the Global Dam Watch (Lehner, B., C. Reidy Liermann, C. Revenga, C. Vörösmarty, B. Fekete, P. Crouzet, P. Döll, M. Endejan, K. Frenken, J. Magome, C. Nilsson, J.C. Robertson, R. Rodel, N. Sindorf, and D. Wisser. 2011. High-resolution mapping of the world’s reservoirs and dams for sustainable river-flow management. Frontiers in Ecology and the Environment 9 (9): 494-502.)
-    .reduceToImage({                                     //Download from https://www.globaldamwatch.org/directory and upload into your own assets, then subtitute the name of the asset
+var maskDams = ee.FeatureCollection('users/userX/GRanD') // Global Reservoir and Dam Database (GRanD) v1.3 (2019), by the Global Dam Watch (Lehner, B., C. Reidy Liermann, C. Revenga, C. Vörösmarty, B. Fekete, P. Crouzet, P. Döll, M. Endejan, K. Frenken, J. Magome, C. Nilsson, J.C. Robertson, R. Rodel, N. Sindorf, and D. Wisser. 2011. High-resolution mapping of the world’s reservoirs and dams for sustainable river-flow management. Frontiers in Ecology and the Environment 9 (9): 494-502.)
+    .reduceToImage({                                     // Download from https://www.globaldamwatch.org/directory and upload into your own assets, then subtitute the name of the asset
         properties: ['value'],
         reducer: ee.Reducer.first()})
     .unmask(0)
     .remap([0,1],[1,0]);
 
-var dams = maskDams.remap([0,1],[3.28,0]).float(); //Is considered that 3.28, double the minimum cost value, should be appropriate for areas in which a reservoir is currently present
+var dams = maskDams.remap([0,1],[3.28,0]).float(); // Is considered that 3.28, double the minimum cost value, should be appropriate for areas in which a reservoir is currently present
 
 
 /////////COLD////////////
@@ -127,7 +127,7 @@ if (periodSel == 'yr') {var temp = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').se
     .multiply(0.1);
 }
 
-else {var temp = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tavg") //These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data.
+else {var temp = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tavg") // These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data.
     .unmask(0)
     .multiply(0.1);
 }
@@ -148,14 +148,14 @@ var cold2 = windChill.lte(tempMaxCold);
 var cold3 = (windChill.lt(tempMinCold)).multiply(tempMinCold);
 var cold4 = (windChill.gt(tempMaxCold)).multiply(tempMaxCold);
 var cold5 = ((cold1.multiply(cold2)).multiply(windChill)).add(cold3).add(cold4);
-var cold = ee.Image(2).subtract(((cold5.subtract(tempMinCold)).divide(tempMaxCold-tempMinCold)));// values from 1 to 2
+var cold = ee.Image(2).subtract(((cold5.subtract(tempMinCold)).divide(tempMaxCold-tempMinCold))); // values from 1 to 2
 
 
 /////////LOOSE SAND OR DUNES////////////
 
 // The variable below calls a raster layer of loose sand/dunes for the study area obtanied from a machine learning classification of
 // multisource multitemporal Sentinel 1 and 2 data
-var looseSand = ee.Image(1).add(ee.Image('users/hao23/looseSand').gte(0.7).multiply(ee.Image('users/hao23/looseSand').multiply(0.9)));
+var looseSand = ee.Image(1).add(ee.Image('users/hao23/looseSand_SA').gte(0.7).multiply(ee.Image('users/hao23/looseSand').multiply(0.9))); // For the territories of the Roman Empire use 'users/hao23/looseSand_RE' instead
 
 
 /////////LACK OF WATER////////////
@@ -168,8 +168,8 @@ var heat1 = temp.gte(tempMin); //values equal or above tempMin = 1, all other va
 var heat2 = temp.lte(tempMax); //values equal or below temMax = 1, all other values = 0.
 var heat3 = (temp.lt(tempMin)).multiply(tempMin); //values lower or equal than tempMin = tempMin
 var heat4 = (temp.gt(tempMax)).multiply(tempMax); //values greater or equal than tempMax = tempMax
-var heat5 = ((heat1.multiply(heat2)).multiply(temp)).add(heat3).add(heat4); //creates a raster where evi values equal or below tempMin = tempMin and all values equal or above tempMax = tempMax. values between them = temp values
-var heat = ((heat5.subtract(tempMin)).divide(tempMax-tempMin)).multiply(2);// values from 0 (<= 25º) to 2 (>= 45º)
+var heat5 = ((heat1.multiply(heat2)).multiply(temp)).add(heat3).add(heat4); // creates a raster where evi values equal or below tempMin = tempMin and all values equal or above tempMax = tempMax. values between them = temp values
+var heat = ((heat5.subtract(tempMin)).divide(tempMax-tempMin)).multiply(2); // values from 0 (<= 25º) to 2 (>= 45º)
 
 // Obtain the multitemporal Enhanced Vegetation Index (EVI).
 // After several proofs this seems to be a better indicator for water presence/absence than NDWI. The mean yearly value makes sure that seasonal cultivation values fall below 0.2.
@@ -199,8 +199,8 @@ var desert2 = evi.lte(dsrtThrs);
 var desert3 = evi.lt(0);
 var desert4 = evi.gt(dsrtThrs).multiply(dsrtThrs);
 var desert5 = ((desert1.multiply(desert2)).multiply(evi)).add(desert4);
-var desert6 = (desert5.divide(dsrtThrs)).add(1); //Values from 1 to 2, when divided to the base cost raster, the lowest values (more desertic) do not change the cost and the higher ones (less desertic) double it
-var desert = ((desert6.subtract(3)).multiply(-1)).subtract(desert3); //Values 1-2. Negative values in EVI can reflect water. For this reason the raster has been reclassified to reflect negatives values as 1
+var desert6 = (desert5.divide(dsrtThrs)).add(1); // Values from 1 to 2, when divided to the base cost raster, the lowest values (more desertic) do not change the cost and the higher ones (less desertic) double it
+var desert = ((desert6.subtract(3)).multiply(-1)).subtract(desert3); // Values 1-2. Negative values in EVI can reflect water. For this reason the raster has been reclassified to reflect negatives values as 1
 
 // Create a cost multiplier that will cost the lack of water according to desertic conditions that will only be added is temperature is above is above 30 °C (monthly max average) and will increase with temperature and aridity increase.
 var noWat = desert.pow(heat);
@@ -221,7 +221,7 @@ if (queryConv == 'y') {
 
 // Select the areas with water presence and reduce their cost using the resulting raster as a divider. EVI healthy vegetation values range from 0.20 to 0.80
 var waterThrs = 0.2;//The water threshold 'waterThrs' is the EVI value designated as the threshold from which water availability (as reflected by the presence of healthy vegetation) starts reducing the cost of movement
-var watAtt = watConv.multiply(evi.gte(waterThrs)).remap([0,1],[1,0.75]);//To make sure that the presence of water will reduce travel costs only in the areas where temperatures are high
+var watAtt = watConv.multiply(evi.gte(waterThrs)).remap([0,1],[1,0.75]); // To make sure that the presence of water will reduce travel costs only in the areas where temperatures are high
 
 }
 
@@ -232,7 +232,7 @@ else {var watAtt = ee.Image(1)}
 
 // Surface water raster
 if (periodSel == 'yr') {var watRecur = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence').unmask(0); 
-    var surfWat = watRecur.divide(33.33).add(ee.Image(1)); //Values from 1 to 4 (original max. value is 100, which has been divided by 33.3 and added 1) as many areas are partially watered durign the months but if there is constant water the cost to pass through should very high
+    var surfWat = watRecur.divide(33.33).add(ee.Image(1)); // Values from 1 to 4 (original max. value is 100, which has been divided by 33.3 and added 1) as many areas are partially watered durign the months but if there is constant water the cost to pass through should very high
 } 
 else {var watRecur = ee.Image('JRC/GSW1_4/MonthlyRecurrence/monthly_recurrence_'+ monthNum).select("monthly_recurrence").unmask(0); 
     var surfWat = watRecur.divide(33.33).add(ee.Image(1));
