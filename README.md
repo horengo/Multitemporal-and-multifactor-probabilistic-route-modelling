@@ -34,10 +34,12 @@ The generation of cost surfaces requires two external datasets:
    Consequently, the notebook and calls the resulting maps from the author's GEE asset repository. The GEE code for the generation of these maps has also been provided for reproducibility reasons but it is not required to run the notebook or the GEE code for the generation of cost surfaces. <br>
    Two loose sand surfaces have been provided in order to cover large areas susceptible to past mobility studies: <br>
    - A map covering large parts of South Asia. To call this map within the code use: 'users/hao23/looseSand_SA' <br>
-   <img width="676" height="332" alt="image" src="https://github.com/user-attachments/assets/234a5345-32fb-4bd8-8a2b-6c8efda875a2" />
+
+    <img width="676" height="332" alt="image" src="https://github.com/user-attachments/assets/234a5345-32fb-4bd8-8a2b-6c8efda875a2" />
 
    - A map covering the territories of the Roman Empire. To call this map within the code use: 'users/hao23/looseSand_RE' <br>
-   <img width="603" height="419" alt="image" src="https://github.com/user-attachments/assets/6a972306-9bcb-410c-9df1-030253f90001" />
+
+    <img width="603" height="419" alt="image" src="https://github.com/user-attachments/assets/6a972306-9bcb-410c-9df1-030253f90001" />
 
 3. The Global Reservoir and Dam Database (GRanD), whcih can be downloaded at https://www.globaldamwatch.org/directory <br>
    Please, note that the GRanD has now been superseded by the The GDW (v1) consensus global database. <br>
