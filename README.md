@@ -51,9 +51,7 @@ The generation of cost surfaces requires two external datasets:
    Please note that GRanD has now been superseded by the GDW v1 consensus global database.
 
    In order to use the database, download it from the provided link and upload it to your GEE assets repository. Then substitute the name of the asset in the code: line 115 of the Cost Surface generation cell in the notebook, and line 99 in the optional GEE code provided.
-3. The Global Reservoir and Dam Database (GRanD), whcih can be downloaded at https://www.globaldamwatch.org/directory <br>
-   Please, note that the GRanD has now been superseded by the The GDW (v1) consensus global database. <br>
-   In order to use the database, please, download it from the provided link and upload in your GEE assets repository. Then substitute the name of the asset in code (line 115 of the Cost Surface generation cell in the notebook, line 99 in the optional GEE code provided).
+
 
 ## For the generation of corridors
 GRASS GIS needs to be installed locally and its grass.bin directory provided within the notebook code. <br>
