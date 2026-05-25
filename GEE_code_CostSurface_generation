@@ -15,7 +15,7 @@ var geometry = ee.Geometry.Polygon([               // This area corresponds to a
 
 ////////////DIGITAL SURFACE MODEL (DSM)///////////////
 
-var elevation = ee.ImageCollection('JAXA/ALOS/AW3D30/V3_2').select('DSM');
+var elevation = ee.ImageCollection('JAXA/ALOS/AW3D30/V4_1').select('DSM');
 var dsm = elevation.mosaic();
 
 
@@ -89,7 +89,7 @@ var snow = snowBase.divide(33.33).add(ee.Image(1)); // This provides a maximum v
 //////////////SEA////////////
 
 // Add a sea mask layer
-var mskALOS = ee.ImageCollection('JAXA/ALOS/AW3D30/V3_2').select('MSK').mosaic();
+var mskALOS = ee.ImageCollection('JAXA/ALOS/AW3D30/V4_1').select('MSK').mosaic();
 var bitSea = mskALOS.bitwiseAnd(3).eq(0);
 
 // Reclassify sea values to the model's maximum cost
@@ -155,7 +155,7 @@ var cold = ee.Image(2).subtract(((cold5.subtract(tempMinCold)).divide(tempMaxCol
 
 // The variable below calls a raster layer of loose sand/dunes for the study area obtanied from a machine learning classification of
 // multisource multitemporal Sentinel 1 and 2 data
-var looseSand = ee.Image(1).add(ee.Image('users/hao23/looseSand_SA').gte(0.7).multiply(ee.Image('users/hao23/looseSand').multiply(0.9))); // For the territories of the Roman Empire use 'users/hao23/looseSand_RE' instead
+var looseSand = ee.Image(1).add(ee.Image('users/hao23/looseSand_SA').gte(0.7).multiply(ee.Image('users/hao23/looseSand_SA').multiply(0.9))); // For the territories of the Roman Empire use 'users/hao23/looseSand_RE' instead
 
 
 /////////LACK OF WATER////////////
