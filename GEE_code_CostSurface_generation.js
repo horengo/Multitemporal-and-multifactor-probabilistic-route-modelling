@@ -1,8 +1,9 @@
 // Define a central point in your study area (as X,Y WGS84 decimal degrees) and a scale,
 // just for visualisation purposes
 Map.setCenter(67.601,37.566,5);
-var geometry = ee.Geometry.Polygon([               // This area corresponds to a large part of South Asia and coincides with the raster mapping the costs of traversing loose sand.
-    [26.034856936314327, 31.965400777310872],      // Modify to fit your own study area but make sure you define a loose sand map that covers it if you inted to use this cost.
+
+var geometry = ee.Geometry.Polygon([            // Geographic coordinates defining the study area
+    [26.034856936314327, 31.965400777310872],
     [34.19255939893447,27.520378920323584],
     [70.85299048338345, 19.854238685800006],
     [90.28374707240327,20.074324423110866],
@@ -15,8 +16,16 @@ var geometry = ee.Geometry.Polygon([               // This area corresponds to a
 
 ////////////DIGITAL SURFACE MODEL (DSM)///////////////
 
-var elevation = ee.ImageCollection('JAXA/ALOS/AW3D30/V4_1').select('DSM');
-var dsm = elevation.mosaic();
+var aw3d = ee.ImageCollection('JAXA/ALOS/AW3D30/V4_1')
+    .filterBounds(geometry);
+
+var elevation = aw3d.select('DSM');
+
+var proj = elevation.first().select(0).projection();
+
+var dsm = elevation
+    .mosaic()
+    .setDefaultProjection(proj);
 
 
 ///////////TEMPORAL PARAMETERS/////////////////
@@ -44,7 +53,7 @@ if (periodSel == 'dec') {var period = dec, monthNum = '11', altNum = '12', perio
 ///////////MAXIMUM COST VALUE/////////////
 
 // Assign a maximum cost value
-var maxCostPrompt = prompt('Value for the maximum cost', 40); // from this value upwards all values will be cosidered the same maximum cost. This aims to reduce the model's cost by normalising it and scaling it at a later stage.
+var maxCostPrompt = prompt('Value for the maximum cost', 40); //from this value upwards all values will be considered the same maximum cost. This aims to reduce the model's cost by normalising it and scaling it at a later stage.
 var maxCost = Math.round(maxCostPrompt);
 
 
@@ -53,8 +62,7 @@ var maxCost = Math.round(maxCostPrompt);
 // Creating a slope map in degrees
 // GEE recommends to "Reproject an image mosaic using a projection from one of the image tiles rather than using the default projection returned by .mosaic()". 
 // Unlike most DSMs in GEE, which are single images, the last version of the ALOS DSM is an Image Collection and presents multiple resolutions
-var proj = elevation.first().select(0).projection();
-var slope = ee.Terrain.slope(elevation.mosaic().setDefaultProjection(proj));
+var slope = ee.Terrain.slope(dsm);
 
 // Transform slope in mathematical degrees
 var slp_rad = slope.multiply(3.1415926536)
@@ -83,36 +91,61 @@ var snowBase = ee.ImageCollection('MODIS/061/MOD10A1').select('NDSI_Snow_Cover')
     .reduce(ee.Reducer.mean())
     .unmask(0);
 
-var snow = snowBase.divide(33.33).add(ee.Image(1)); // This provides a maximum value of around 4 (original max. value is 100, which has been divided by 33.33 and added 1) for the study area, in line with suggested values for Pandolf et al. 1977 (in Herzog Int.Arch., 36,5)
+var snow = snowBase.divide(33.33).add(ee.Image(1)); //This provides a maximum value of around 4 (original max. value is 100, which has been divided by 33.33 and added 1) for the study area, in line with suggested values for Pandolf et al. 1977 (in Herzog Int.Arch., 36,5)
 
 
 //////////////SEA////////////
 
 // Add a sea mask layer
-var mskALOS = ee.ImageCollection('JAXA/ALOS/AW3D30/V4_1').select('MSK').mosaic();
-var bitSea = mskALOS.bitwiseAnd(3).eq(0);
+var mskALOS = aw3d
+    .select('MSK')
+    .mosaic()
+    .setDefaultProjection(proj);
 
-// Reclassify sea values to the model's maximum cost
-var seaMsk = bitSea.remap([0,1],[maxCost,0]);
+var alosSea = mskALOS // In the AW3D MSK band, cells classified as sea have a value of 3
+    .bitwiseAnd(3)
+    .eq(3)
+    .unmask(0)
+    .toByte();
+
+// Additional Caspian Sea mask. AW3D30 V4.1 disables the Caspian sea mask, so it has been added independently
+var caspianRegion = ee.Geometry.Rectangle([46.0, 36.0, 55.2, 47.8], null, false); // A rectangle with the approximate area
+
+var caspianSea = ee.Image('JRC/GSW1_4/GlobalSurfaceWater') // JRC water mask restricted to the Caspian region
+    .select('occurrence')
+    .gte(90) // water present in at least 90% of valid observations
+    .clip(caspianRegion)
+    .unmask(0, false)
+    .toByte();
+
+// Combined mask for all seas. AW3D masks ordinary seas/oceans and JRC adds the Caspian Sea.
+var allSeas = alosSea
+    .or(caspianSea)
+    .rename('allSeas');
+
+// Reclassify sea cells to the model's maximum cost
+var seaMsk = allSeas
+    .multiply(maxCost)
+    .float();
 
 
 //////////////ELIMINATE RESERVOIRS////////////
 
-var maskDams = ee.FeatureCollection('users/userX/GRanD') // Global Reservoir and Dam Database (GRanD) v1.3 (2019), by the Global Dam Watch (Lehner, B., C. Reidy Liermann, C. Revenga, C. Vörösmarty, B. Fekete, P. Crouzet, P. Döll, M. Endejan, K. Frenken, J. Magome, C. Nilsson, J.C. Robertson, R. Rodel, N. Sindorf, and D. Wisser. 2011. High-resolution mapping of the world’s reservoirs and dams for sustainable river-flow management. Frontiers in Ecology and the Environment 9 (9): 494-502.)
-    .reduceToImage({                                     // Download from https://www.globaldamwatch.org/directory and upload into your own assets, then subtitute the name of the asset
+var maskDams = ee.FeatureCollection('users/hao23/Grand_reservoirs') //Global Reservoir and Dam Database (GRanD) v1.3 (2019), by the Global Dam Watch (Lehner, B., C. Reidy Liermann, C. Revenga, C. Vörösmarty, B. Fekete, P. Crouzet, P. Döll, M. Endejan, K. Frenken, J. Magome, C. Nilsson, J.C. Robertson, R. Rodel, N. Sindorf, and D. Wisser. 2011. High-resolution mapping of the world’s reservoirs and dams for sustainable river-flow management. Frontiers in Ecology and the Environment 9 (9): 494-502.)
+    .reduceToImage({                                                //Download from https://www.globaldamwatch.org/directory and upload into your own assets, then substitute the name of the asset
         properties: ['value'],
         reducer: ee.Reducer.first()})
     .unmask(0)
     .remap([0,1],[1,0]);
 
-var dams = maskDams.remap([0,1],[3.28,0]).float(); // Is considered that 3.28, double the minimum cost value, should be appropriate for areas in which a reservoir is currently present
+var dams = maskDams.remap([0,1],[3.28,0]).float(); //Is considered that 3.28, double the minimum cost value, should be appropriate for areas in which a reservoir is currently present
 
 
 /////////COLD////////////
 
-// Select a range of surface temperatures to measure the importance of desertic conditions
-var tempMinCold = -15; //Minimum value (in °C) for the monthly average of maximum surface temperature from which aridity will add to the cost of movement
-var tempMaxCold = 10; //Maxiumu value (in °C) for the monthly average of maximum surface temperature.
+// Select a range of surface temperatures to measure the importance of cold
+var tempMinCold = -15; // Minimum value (in °C) for the monthly average surface temperature (the minimum would correspond to night times)
+var tempMaxCold = 5; // Maximum value (in °C) for the monthly average of average surface temperature
 
 var windSpeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE').select('vs')
     .filter(period)
@@ -121,88 +154,95 @@ var windSpeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE').select('vs')
     .unmask(0)
     .multiply(0.036); // This multiplication includes the scale factor for this band (0.01) and the multiplication to pass from m/s to Km/h (3.6)
 
-if (periodSel == 'yr') {var temp = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tavg")
+if (periodSel == 'yr') {var tempCold = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tavg")
     .reduce(ee.Reducer.mean())
-    .unmask(0)
     .multiply(0.1);
 }
 
-else {var temp = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tavg") // These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data.
-    .unmask(0)
+else {var tempCold = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tavg") //These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data.
     .multiply(0.1);
 }
 
 // Wind chill has different formulae but this seems the most updated: WC = 13.12 + 0.6215T – 11.37V^0.16 + 0.3965TV^0.16   more info: https://www.calculator.net/wind-chill-calculator.html
 // The index is defined for temperature at or below 10℃ (50F) and wind speed above 4.8km/h (3mph).
-
 var wcValues = ee.Image(13.12)
-    .add(ee.Image(0.6215).multiply(temp))
+    .add(ee.Image(0.6215).multiply(tempCold))
     .subtract(ee.Image(11.37).multiply(windSpeed.pow(0.16)))
-    .add(ee.Image(0.3965).multiply(temp).multiply(windSpeed.pow(0.16)));
+    .add(ee.Image(0.3965).multiply(tempCold).multiply(windSpeed.pow(0.16)));
 
-var windChill = ((temp.lte(10).and(windSpeed.gte(4.8))).multiply(wcValues))
-    .add((temp.gt(10).or(windSpeed.lt(4.8))).multiply(temp));
+var windChill = ((tempCold.lte(10).and(windSpeed.gte(4.8))).multiply(wcValues))
+    .add((tempCold.gt(10).or(windSpeed.lt(4.8))).multiply(tempCold));
 
 var cold1 = windChill.gte(tempMinCold);
 var cold2 = windChill.lte(tempMaxCold);
 var cold3 = (windChill.lt(tempMinCold)).multiply(tempMinCold);
 var cold4 = (windChill.gt(tempMaxCold)).multiply(tempMaxCold);
 var cold5 = ((cold1.multiply(cold2)).multiply(windChill)).add(cold3).add(cold4);
-var cold = ee.Image(2).subtract(((cold5.subtract(tempMinCold)).divide(tempMaxCold-tempMinCold))); // values from 1 to 2
+var cold = ee.Image(2).subtract(((cold5.subtract(tempMinCold)).divide(tempMaxCold-tempMinCold)));// values from 1 to 2
 
 
 /////////LOOSE SAND OR DUNES////////////
 
-// The variable below calls a raster layer of loose sand/dunes for the study area obtanied from a machine learning classification of
+// The variable below calls a raster layer of loose sand/dunes for the study area obtained from a machine learning classification of
 // multisource multitemporal Sentinel 1 and 2 data
-var looseSand = ee.Image(1).add(ee.Image('users/hao23/looseSand_SA').gte(0.7).multiply(ee.Image('users/hao23/looseSand_SA').multiply(0.9))); // For the territories of the Roman Empire use 'users/hao23/looseSand_RE' instead
+var sandProb = ee.Image('users/hao23/looseSand_SA').unmask(0);  // Use 'users/hao23/looseSand_RE' for the Roman Empire area
+
+var looseSand = ee.Image(1)
+  .add(sandProb.gte(0.7).multiply(sandProb.multiply(0.9)));
 
 
 /////////LACK OF WATER////////////
 
-// Select a range of surface temperatures to measure the importance of desertic conditions
-var tempMin = 25; //Minimum value (in °C) for the monthly average of maximum air temperature from which aridity will add to the cost of movement
+// Select a range of surface temperatures to measure the importance of desert conditions
+var tempMin = 26; //Minimum value (in °C) for the monthly average of maximum air temperature from which aridity will add to the cost of movement
 var tempMax = 40; //Maxiumu value (in °C) for the monthly average of maximum air temperature.
 
-var heat1 = temp.gte(tempMin); //values equal or above tempMin = 1, all other values = 0.
-var heat2 = temp.lte(tempMax); //values equal or below temMax = 1, all other values = 0.
-var heat3 = (temp.lt(tempMin)).multiply(tempMin); //values lower or equal than tempMin = tempMin
-var heat4 = (temp.gt(tempMax)).multiply(tempMax); //values greater or equal than tempMax = tempMax
-var heat5 = ((heat1.multiply(heat2)).multiply(temp)).add(heat3).add(heat4); // creates a raster where evi values equal or below tempMin = tempMin and all values equal or above tempMax = tempMax. values between them = temp values
-var heat = ((heat5.subtract(tempMin)).divide(tempMax-tempMin)).multiply(2); // values from 0 (<= 25º) to 2 (>= 45º)
+if (periodSel == 'yr') {var tempHeat = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tmax")
+    .reduce(ee.Reducer.mean())
+    .multiply(0.1);
+}
+
+else {var tempHeat = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tmax") //These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data
+    .multiply(0.1);
+}
+
+var heat1 = tempHeat.gte(tempMin); //values equal or above tempMin = 1, all other values = 0.
+var heat2 = tempHeat.lte(tempMax); //values equal or below temMax = 1, all other values = 0.
+var heat3 = (tempHeat.lt(tempMin)).multiply(tempMin); //values lower or equal than tempMin = tempMin
+var heat4 = (tempHeat.gt(tempMax)).multiply(tempMax); //values greater or equal than tempMax = tempMax
+var heat5 = ((heat1.multiply(heat2)).multiply(tempHeat)).add(heat3).add(heat4); //creates a raster where evi values equal or below tempMin = tempMin and all values equal or above tempMax = tempMax. values between them = temp values
+var heat = ((heat5.subtract(tempMin)).divide(tempMax-tempMin)).multiply(2);// values from 0 (<= 26°C) to 2 (>= 40°C)
 
 // Obtain the multitemporal Enhanced Vegetation Index (EVI).
-// After several proofs this seems to be a better indicator for water presence/absence than NDWI. The mean yearly value makes sure that seasonal cultivation values fall below 0.2.
-// The selection of years reduces the impact of large irrigation schemes in most of the study area.
+// After several proofs this seems to be a better indicator for water presence/absence than NDWI. The mean yearly value makes sure that seasonal cultivation values fall below 0.2
+// The selection of years reduces the impact of large irrigation schemes in most of the study area
 if (periodSel == 'yr') {
   var evi = ee.ImageCollection('LANDSAT/COMPOSITES/C02/T1_L2_8DAY_EVI')
     .filterDate('1984-01-01', '1995-12-31')
     .filter(period)
     .filterBounds(geometry)
-    .reduce(ee.Reducer.mean())
-    .unmask(0);
+    .reduce(ee.Reducer.mean());
 }
 else {
   var evi = ee.ImageCollection('LANDSAT/COMPOSITES/C02/T1_L2_8DAY_EVI') // As there are not enough single month images to comprehensively cover the study area the temporal period has been extended until 2015 for single month queries
     .filterDate('1984-01-01', '2015-12-31')
     .filter(period)
     .filterBounds(geometry)
-    .reduce(ee.Reducer.mean())
-    .unmask(0);
+    .reduce(ee.Reducer.mean());
 }
 
-// Select desertic areas and give them a high cost. The values are selected for the layer to be used as a multiplier with maximum values of around 2 (double cost)
-var dsrtThrs = 0.075; //The desert threshold 'dsrtThrs' is the EVI value designated as the threshold in which desertic conditions (lack of water and vegetation, healthy vegetation values range from 0.2 to 0.8) start to increase the cost of movement;
+// Select desert areas and give them a high cost. The values are selected for the layer to be used as a multiplier with maximum values of 4, which, in practical terms, is reduced to around 2 (double cost)
+var dsrtThrs = 0.075; //The desert threshold 'dsrtThrs' is the EVI value designated as the threshold in which desert conditions (lack of water and vegetation, healthy vegetation values range from 0.2 to 0.8) start to increase the cost of movement;
 
 var desert1 = evi.gte(0);
 var desert2 = evi.lte(dsrtThrs);
 var desert3 = evi.lt(0);
 var desert4 = evi.gt(dsrtThrs).multiply(dsrtThrs);
 var desert5 = ((desert1.multiply(desert2)).multiply(evi)).add(desert4);
-var desert6 = (desert5.divide(dsrtThrs)).add(1); // Values from 1 to 2, when divided to the base cost raster, the lowest values (more desertic) do not change the cost and the higher ones (less desertic) double it
-var desert = ((desert6.subtract(3)).multiply(-1)).subtract(desert3); // Values 1-2. Negative values in EVI can reflect water. For this reason the raster has been reclassified to reflect negatives values as 1
+var desert6 = (desert5.divide(dsrtThrs)).add(1); //Values from 1 to 2, when divided to the base cost raster, the lowest values (very arid) do not change the cost and the higher ones (less arid) double it
+var desert = ((desert6.subtract(3)).multiply(-1)).subtract(desert3); //Values 1-2. Negative values in EVI can reflect water. For this reason the raster has been reclassified to reflect negatives values as 1
 
-// Create a cost multiplier that will cost the lack of water according to desertic conditions that will only be added is temperature is above is above 30 °C (monthly max average) and will increase with temperature and aridity increase.
+// Create a cost multiplier that will cost the lack of water according to desert conditions that will only be added is temperature is above 26 °C (monthly max average) and will increase with temperature and aridity increase.
 var noWat = desert.pow(heat);
 
 
@@ -221,10 +261,8 @@ if (queryConv == 'y') {
 
 // Select the areas with water presence and reduce their cost using the resulting raster as a divider. EVI healthy vegetation values range from 0.20 to 0.80
 var waterThrs = 0.2;//The water threshold 'waterThrs' is the EVI value designated as the threshold from which water availability (as reflected by the presence of healthy vegetation) starts reducing the cost of movement
-var watAtt = watConv.multiply(evi.gte(waterThrs)).remap([0,1],[1,0.75]); // To make sure that the presence of water will reduce travel costs only in the areas where temperatures are high
-
+var watAtt = watConv.multiply(evi.gte(waterThrs)).remap([0,1],[1,0.75]);//To make sure that the presence of water will reduce travel costs only in the areas where temperatures are high
 }
-
 else {var watAtt = ee.Image(1)}
 
 
@@ -232,7 +270,7 @@ else {var watAtt = ee.Image(1)}
 
 // Surface water raster
 if (periodSel == 'yr') {var watRecur = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence').unmask(0); 
-    var surfWat = watRecur.divide(33.33).add(ee.Image(1)); // Values from 1 to 4 (original max. value is 100, which has been divided by 33.3 and added 1) as many areas are partially watered durign the months but if there is constant water the cost to pass through should very high
+    var surfWat = watRecur.divide(33.33).add(ee.Image(1)); //Values from 1 to 4 (original max. value is 100, which has been divided by 33.3 and added 1) as many areas are partially watered during the months but if there is constant water the cost to pass through should very high
 } 
 else {var watRecur = ee.Image('JRC/GSW1_4/MonthlyRecurrence/monthly_recurrence_'+ monthNum).select("monthly_recurrence").unmask(0); 
     var surfWat = watRecur.divide(33.33).add(ee.Image(1));
@@ -243,7 +281,7 @@ else {var watRecur = ee.Image('JRC/GSW1_4/MonthlyRecurrence/monthly_recurrence_'
 
 // Height above 2000 m.a.s.l. using a purposely developed non-linear exponential equation for proportional rate growth to fit the curve to the three points (2000,1; 5050,1.24; 5600,1.39):
 // cost = 0.9829854 - (-0.000003334709/-0.0008254486)*(1 - e^(0.0008254486*height))
-// This function derives a curve intersecting the two values for which we have data on how altitue affects performance (from Herzog Int.Arch, 36-5):
+// This function derives a curve intersecting the two values for which we have data on how altitude affects performance (from Herzog Int.Arch, 36-5):
 // “The European Commission (European Commission, 1995–2010 Travel Time to Major Cities: A global map of Accessibility. http://bioval.jrc.ec.europa.eu/products/gam/index.htm) assumes that there is no negative effect on walking speed below an altitude of 2000m” … "Minetti et al. (Minetti, A.E., Formenti, F. and Ardigò, L.P. 2006 'Himalayan porter's specialization: metabolic power, economy, efficiency and skill', Proceedings of the Royal Society on Biological Sciences, 273: 2791–7. http://dx.doi.org/10.1098/rspb.2006.3653) refer to a study which found that the maximum metabolic power decreases at high altitude, i.e. at 5600m asl, the maximum metabolic power of a Caucasian is only 61% of that measured at sea-level. So the values given by the (corrected) formula used by the European Commission seem to exaggerate the effects of high altitudes. In the experiments of the Minetti research group, both Nepalese porters and Caucasians experienced a drop of 24% of the maximum metabolic power at an altitude of 5050m asl" 
 
 var height = (ee.Image(-0.0170146).subtract(ee.Image(0.004039874802622).multiply(ee.Image(1).subtract(ee.Image(2.718281828459).pow(dsm.multiply(ee.Image(0.0008254486)))))))
@@ -269,14 +307,14 @@ var costsRaw = costSlp
 
 // This is necessary to reduce the very high computational costs a floating raster will have in the calculation of the cost accumulation raster. From the current floating point raster we will develop an unsigned 8 bit raster.
 // This will be done in two steps:
-//   1. The maximum cost value that will substitute all values larger than it. This is done so the scaling will not have to incorporate the maximum values of the loating raster and, in doing so reduce the resolution of the lower values that are the most significant in terms of movement.
-//   2. 8-bit scaling
+//   1. The maximum cost value that will substitute all values larger than it. This is done so the scaling will not have to incorporate the maximum values of the floating raster and, in doing so reduce the resolution of the lower values that are the most significant in terms of movement.
+//   2. 8-bit scaling for low memory settings and small rasters / or float scaling for memory efficient use in GRASS r.cost
 
 // Substitute all values higher than the maximum cost value
 var costsMax = (costsRaw.gt(maxCost).multiply(maxCost))
     .add(costsRaw.lte(maxCost).multiply(costsRaw));
 
-var bitSel = prompt('Select 8-bit or floating-point raster output', 'Floating');
+var bitSel = prompt('Select 8-bit or floating-point raster output', 'Float');
 
 if (bitSel == '8-bit') {var costs = (costsMax.divide(maxCost)).multiply(255).byte().clip(geometry).unmask(255); //8-bit scaling of values
     Map.addLayer(costs, {min:1, max:150, palette: '0f00ff, 03ff00, efff00, ffbc00, ff0000, ff0081'}, 'Cost surface');
@@ -289,7 +327,7 @@ else {var costs = costsMax.multiply(ee.Number(10).pow(4)).round().divide(ee.Numb
 ////////////////EXPORT MAP///////////////////
 
 var rr = Math.round((proj.nominalScale().getInfo())*10000) / 10000;
-var outrrPrmpt = prompt('Output raster resolution in m (defult equals the resolution of the DSM)', rr);
+var outrrPrmpt = prompt('Output raster resolution in m (defaults to the resolution of the DSM)', rr);
 
 if (outrrPrmpt <= rr) {var outrr = rr;} else {var outrr = outrrPrmpt;}
 
