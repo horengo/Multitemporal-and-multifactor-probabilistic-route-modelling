@@ -47,11 +47,11 @@ cost surface generation script.
 
      <img width="603" height="419" alt="Loose sand map covering the territories of the Roman Empire" src="https://github.com/user-attachments/assets/6a972306-9bcb-410c-9df1-030253f90001" />
 
-3. The Global Reservoir and Dam Database (GRanD), which can be downloaded at https://www.globaldamwatch.org/directory
+2. The Global Reservoir and Dam Database (GRanD), which can be downloaded at https://www.globaldamwatch.org/directory
 
    Please note that GRanD has now been superseded by the GDW v1 consensus global database.
 
-   In order to use the database, download it from the provided link and upload it to your GEE assets repository. Then substitute the name of the asset in the code: line 115 of the Cost Surface generation cell in the notebook, and line 99 in the optional GEE code provided.
+   In order to use the database, download it from the provided link and upload it to your GEE assets repository. Then substitute the name of the asset in the code: line 185 of the Cost Surface generation cell in the notebook, and line 134 in the optional GEE code provided.
 
 
 ## For the generation of corridors
