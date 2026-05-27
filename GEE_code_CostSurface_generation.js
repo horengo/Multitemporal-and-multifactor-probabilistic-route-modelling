@@ -154,12 +154,12 @@ var windSpeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE').select('vs')
     .unmask(0)
     .multiply(0.036); // This multiplication includes the scale factor for this band (0.01) and the multiplication to pass from m/s to Km/h (3.6)
 
-if (periodSel == 'yr') {var tempCold = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tavg")
+if (periodSel == 'yr') {var tempCold = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tmax") // The maximum temperature has been chosen to reflect values during daytime
     .reduce(ee.Reducer.mean())
     .multiply(0.1);
 }
 
-else {var tempCold = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tavg") // These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data.
+else {var tempCold = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tmax")
     .multiply(0.1);
 }
 
