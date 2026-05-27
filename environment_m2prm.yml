@@ -1,4 +1,4 @@
-name: m2conet
+name: m2prm
 channels:
   - conda-forge
 dependencies:
