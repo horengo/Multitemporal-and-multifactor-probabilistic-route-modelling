@@ -41,7 +41,7 @@ cost surface generation script.
 
    - A map covering large parts of South Asia. To call this map within the code use: `users/hao23/looseSand_SA`
 
-     <img width="676" height="332" alt="Loose sand map covering large parts of South Asia" src="https://github.com/user-attachments/assets/234a5345-32fb-4bd8-8a2b-6c8efda875a2" />
+     <img width="1328" height="619" alt="Loose sand map covering large parts of South Asia" src="https://github.com/user-attachments/assets/90f4415e-7962-4af1-91b8-145e948d84b3" />
 
    - A map covering the territories of the Roman Empire. To call this map within the code use: `users/hao23/looseSand_RE`
 
