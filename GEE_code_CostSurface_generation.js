@@ -25,7 +25,8 @@ var proj = elevation.first().select(0).projection();
 
 var dsm = elevation
     .mosaic()
-    .setDefaultProjection(proj);
+    .setDefaultProjection(proj)
+    .clip(geometry);
 
 
 ///////////TEMPORAL PARAMETERS/////////////////
@@ -89,7 +90,8 @@ var snowBase = ee.ImageCollection('MODIS/061/MOD10A1').select('NDSI_Snow_Cover')
     .filter(period)
     .filterBounds(geometry)
     .reduce(ee.Reducer.mean())
-    .unmask(0);
+    .unmask(0)
+    .clip(geometry);
 
 var snow = snowBase.divide(33.33).add(ee.Image(1)); // This provides a maximum value of around 4 (original max. value is 100, which has been divided by 33.33 and added 1) for the study area, in line with suggested values for Pandolf et al. 1977 (in Herzog Int.Arch., 36,5)
 
@@ -100,28 +102,29 @@ var snow = snowBase.divide(33.33).add(ee.Image(1)); // This provides a maximum v
 var mskALOS = aw3d
     .select('MSK')
     .mosaic()
+    .clip(geometry)
     .setDefaultProjection(proj);
 
 var alosSea = mskALOS // In the AW3D MSK band, cells classified as sea have a value of 3
     .bitwiseAnd(3)
     .eq(3)
     .unmask(0)
-    .toByte();
+    .toByte()
+    .rename('allSeas');
 
 // Additional Caspian Sea mask. AW3D30 V4.1 disables the Caspian sea mask, so it has been added independently
 var caspianRegion = ee.Geometry.Rectangle([46.0, 36.0, 55.2, 47.8], null, false); // A rectangle with the approximate area
 
 var caspianSea = ee.Image('JRC/GSW1_4/GlobalSurfaceWater') // JRC water mask restricted to the Caspian region
     .select('occurrence')
-    .gte(90) // water present in at least 90% of valid observations
     .clip(caspianRegion)
-    .unmask(0, false)
-    .toByte();
+    .unmask(0)
+    .gte(90) // water present in at least 90% of valid observations
+    .toByte()
+    .rename('allSeas');
 
 // Combined mask for all seas. AW3D masks ordinary seas/oceans and JRC adds the Caspian Sea.
-var allSeas = alosSea
-    .or(caspianSea)
-    .rename('allSeas');
+var allSeas = ee.ImageCollection([alosSea, caspianSea]).mosaic();
 
 // Reclassify sea cells to the model's maximum cost
 var seaMsk = allSeas
@@ -136,7 +139,8 @@ var maskDams = ee.FeatureCollection('users/hao23/Grand_reservoirs') // Global Re
         properties: ['value'],
         reducer: ee.Reducer.first()})
     .unmask(0)
-    .remap([0,1],[1,0]);
+    .remap([0,1],[1,0])
+    .clip(geometry);
 
 var dams = maskDams.remap([0,1],[3.28,0]).float(); // It is considered that 3.28, double the minimum cost value, should be appropriate for areas in which a reservoir is currently present
 
@@ -152,15 +156,20 @@ var windSpeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE').select('vs')
     .filterBounds(geometry)
     .reduce(ee.Reducer.mean())
     .unmask(0)
-    .multiply(0.036); // This multiplication includes the scale factor for this band (0.01) and the multiplication to pass from m/s to Km/h (3.6)
+    .multiply(0.036) // This multiplication includes the scale factor for this band (0.01) and the multiplication to pass from m/s to Km/h (3.6)
+    .clip(geometry);
 
 if (periodSel == 'yr') {var tempCold = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tmax") // The maximum temperature has been chosen to reflect values during daytime
     .reduce(ee.Reducer.mean())
-    .multiply(0.1);
+    .unmask(0)
+    .multiply(0.1)
+    .clip(geometry);
 }
 
 else {var tempCold = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tmax")
-    .multiply(0.1);
+    .unmask(0)
+    .multiply(0.1)
+    .clip(geometry);
 }
 
 // Wind chill has different formulae but this seems the most updated: WC = 13.12 + 0.6215T – 11.37V^0.16 + 0.3965TV^0.16   more info: https://www.calculator.net/wind-chill-calculator.html
@@ -185,7 +194,7 @@ var cold = ee.Image(2).subtract(((cold5.subtract(tempMinCold)).divide(tempMaxCol
 
 // The variable below calls a raster layer of loose sand/dunes for the study area obtained from a machine learning classification of
 // multisource multitemporal Sentinel 1 and 2 data
-var sandProb = ee.Image('users/hao23/looseSand_SA').unmask(0); // Use 'users/hao23/looseSand_RE' for the Roman Empire area
+var sandProb = ee.Image('users/hao23/looseSand_SA').unmask(0).clip(geometry); // Use 'users/hao23/looseSand_RE' for the Roman Empire area
 
 var looseSand = ee.Image(1)
   .add(sandProb.gte(0.7).multiply(sandProb.multiply(0.9)));
@@ -199,11 +208,15 @@ var tempMax = 38; // Maxiumu value (in °C) for the monthly average of maximum a
 
 if (periodSel == 'yr') {var tempHeat = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tmax")
     .reduce(ee.Reducer.mean())
-    .multiply(0.1);
+    .multiply(0.1)
+    .unmask(0)
+    .clip(geometry);
 }
 
 else {var tempHeat = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tmax") // These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data
-    .multiply(0.1);
+    .multiply(0.1)
+    .unmask(0)
+    .clip(geometry);
 }
 
 var heat1 = tempHeat.gte(tempMin); // Values equal or above tempMin = 1, all other values = 0
@@ -221,14 +234,18 @@ if (periodSel == 'yr') {
     .filterDate('1984-01-01', '1995-12-31')
     .filter(period)
     .filterBounds(geometry)
-    .reduce(ee.Reducer.mean());
+    .reduce(ee.Reducer.mean())
+    .unmask(0)
+    .clip(geometry);
 }
 else {
   var evi = ee.ImageCollection('LANDSAT/COMPOSITES/C02/T1_L2_8DAY_EVI') // As there are not enough single month images to comprehensively cover the study area the temporal period has been extended until 2015 for single month queries
     .filterDate('1984-01-01', '2015-12-31')
     .filter(period)
     .filterBounds(geometry)
-    .reduce(ee.Reducer.mean());
+    .reduce(ee.Reducer.mean())
+    .unmask(0)
+    .clip(geometry);
 }
 
 // Select desert areas and give them a high cost. The values are selected for the layer to be used as a multiplier with maximum values of 4, which, in practical terms, is reduced to around 2 (double cost)
@@ -270,10 +287,10 @@ else {var watAtt = ee.Image(1)}
 
 // Surface water raster
 if (periodSel == 'yr') {var watRecur = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence').unmask(0); 
-    var surfWat = watRecur.divide(33.33).add(ee.Image(1)); // Values from 1 to 4 (original max. value is 100, which has been divided by 33.3 and added 1) as many areas are partially watered during the months but if there is constant water the cost to pass through should very high
+    var surfWat = watRecur.divide(33.33).add(ee.Image(1)).clip(geometry); // Values from 1 to 4 (original max. value is 100, which has been divided by 33.3 and added 1) as many areas are partially watered during the months but if there is constant water the cost to pass through should very high
 } 
 else {var watRecur = ee.Image('JRC/GSW1_4/MonthlyRecurrence/monthly_recurrence_'+ monthNum).select("monthly_recurrence").unmask(0); 
-    var surfWat = watRecur.divide(33.33).add(ee.Image(1));
+    var surfWat = watRecur.divide(33.33).add(ee.Image(1)).clip(geometry);
 }
 
 
