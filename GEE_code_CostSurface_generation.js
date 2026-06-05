@@ -159,9 +159,7 @@ var windSpeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE').select('vs')
     .multiply(0.036) // This multiplication includes the scale factor for this band (0.01) and the multiplication to pass from m/s to Km/h (3.6)
     .clip(geometry);
 
-// Daytime temperature proxy:
-// intermediate between the 24-hour monthly mean and the monthly average daily maximum
-
+// Daytime temperature proxy: intermediate between the 24-hour monthly mean and the monthly average daily maximum
 if (periodSel == 'yr') {
 
     var tempBands = ee.ImageCollection('WORLDCLIM/V1/MONTHLY')
@@ -172,7 +170,7 @@ if (periodSel == 'yr') {
     var temp = tempBands.select('tavg')
         .add(tempBands.select('tmax'))
         .divide(2)
-        .rename('tday_proxy');
+        .rename('tday');
 }
 
 else {
@@ -184,7 +182,7 @@ else {
     var temp = tempBands.select('tavg')
         .add(tempBands.select('tmax'))
         .divide(2)
-        .rename('tday_proxy');
+        .rename('tday');
 }
 
 // Wind chill has different formulae but this seems the most updated: WC = 13.12 + 0.6215T – 11.37V^0.16 + 0.3965TV^0.16   more info: https://www.calculator.net/wind-chill-calculator.html
