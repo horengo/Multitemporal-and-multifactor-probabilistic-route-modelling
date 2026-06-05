@@ -159,28 +159,43 @@ var windSpeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE').select('vs')
     .multiply(0.036) // This multiplication includes the scale factor for this band (0.01) and the multiplication to pass from m/s to Km/h (3.6)
     .clip(geometry);
 
-if (periodSel == 'yr') {var tempCold = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tmax") // The maximum temperature has been chosen to reflect values during daytime
-    .reduce(ee.Reducer.mean())
-    .unmask(0)
-    .multiply(0.1)
-    .clip(geometry);
+// Daytime temperature proxy:
+// intermediate between the 24-hour monthly mean and the monthly average daily maximum
+
+if (periodSel == 'yr') {
+
+    var tempBands = ee.ImageCollection('WORLDCLIM/V1/MONTHLY')
+        .select(['tavg', 'tmax'])
+        .mean()
+        .multiply(0.1); // WorldClim temperatures are stored as °C * 10
+
+    var temp = tempBands.select('tavg')
+        .add(tempBands.select('tmax'))
+        .divide(2)
+        .rename('tday_proxy');
 }
 
-else {var tempCold = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tmax")
-    .unmask(0)
-    .multiply(0.1)
-    .clip(geometry);
+else {
+
+    var tempBands = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum)
+        .select(['tavg', 'tmax'])
+        .multiply(0.1); // WorldClim temperatures are stored as °C * 10
+
+    var temp = tempBands.select('tavg')
+        .add(tempBands.select('tmax'))
+        .divide(2)
+        .rename('tday_proxy');
 }
 
 // Wind chill has different formulae but this seems the most updated: WC = 13.12 + 0.6215T – 11.37V^0.16 + 0.3965TV^0.16   more info: https://www.calculator.net/wind-chill-calculator.html
 // The index is defined for temperature at or below 10℃ (50F) and wind speed above 4.8km/h (3mph).
 var wcValues = ee.Image(13.12)
-    .add(ee.Image(0.6215).multiply(tempCold))
+    .add(ee.Image(0.6215).multiply(temp))
     .subtract(ee.Image(11.37).multiply(windSpeed.pow(0.16)))
-    .add(ee.Image(0.3965).multiply(tempCold).multiply(windSpeed.pow(0.16)));
+    .add(ee.Image(0.3965).multiply(temp).multiply(windSpeed.pow(0.16)));
 
-var windChill = ((tempCold.lte(10).and(windSpeed.gte(4.8))).multiply(wcValues))
-    .add((tempCold.gt(10).or(windSpeed.lt(4.8))).multiply(tempCold));
+var windChill = ((temp.lte(10).and(windSpeed.gte(4.8))).multiply(wcValues))
+    .add((temp.gt(10).or(windSpeed.lt(4.8))).multiply(temp));
 
 var cold1 = windChill.gte(tempMinCold);
 var cold2 = windChill.lte(tempMaxCold);
@@ -206,24 +221,11 @@ var looseSand = ee.Image(1)
 var tempMin = 26; // Minimum value (in °C) for the monthly average of maximum air temperature from which aridity will add to the cost of movement
 var tempMax = 38; // Maxiumu value (in °C) for the monthly average of maximum air temperature.
 
-if (periodSel == 'yr') {var tempHeat = ee.ImageCollection('WORLDCLIM/V1/MONTHLY').select("tmax")
-    .reduce(ee.Reducer.mean())
-    .multiply(0.1)
-    .unmask(0)
-    .clip(geometry);
-}
-
-else {var tempHeat = ee.Image('WORLDCLIM/V1/MONTHLY/' + altNum).select("tmax") // These reflect air temperature above surface. However, these present a low spatial resolution and do not take into account the effect of shadows. This dataset has, therefore been substituted by the Landsat 8 thermal data
-    .multiply(0.1)
-    .unmask(0)
-    .clip(geometry);
-}
-
-var heat1 = tempHeat.gte(tempMin); // Values equal or above tempMin = 1, all other values = 0
-var heat2 = tempHeat.lte(tempMax); // Values equal or below temMax = 1, all other values = 0
-var heat3 = (tempHeat.lt(tempMin)).multiply(tempMin); // Values lower or equal than tempMin = tempMin
-var heat4 = (tempHeat.gt(tempMax)).multiply(tempMax); // Values greater or equal than tempMax = tempMax
-var heat5 = ((heat1.multiply(heat2)).multiply(tempHeat)).add(heat3).add(heat4); // Creates a raster where evi values equal or below tempMin = tempMin and all values equal or above tempMax = tempMax. values between them = temp values
+var heat1 = temp.gte(tempMin); // Values equal or above tempMin = 1, all other values = 0
+var heat2 = temp.lte(tempMax); // Values equal or below temMax = 1, all other values = 0
+var heat3 = (temp.lt(tempMin)).multiply(tempMin); // Values lower or equal than tempMin = tempMin
+var heat4 = (temp.gt(tempMax)).multiply(tempMax); // Values greater or equal than tempMax = tempMax
+var heat5 = ((heat1.multiply(heat2)).multiply(temp)).add(heat3).add(heat4); // Creates a raster where evi values equal or below tempMin = tempMin and all values equal or above tempMax = tempMax. values between them = temp values
 var heat = ((heat5.subtract(tempMin)).divide(tempMax-tempMin)).multiply(2); // Values from 0 (<= 26°C) to 2 (>= 40°C)
 
 // Obtain the multitemporal Enhanced Vegetation Index (EVI).
