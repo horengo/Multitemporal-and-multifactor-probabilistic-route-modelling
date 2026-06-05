@@ -148,8 +148,8 @@ var dams = maskDams.remap([0,1],[3.28,0]).float(); // It is considered that 3.28
 /////////COLD////////////
 
 // Select a range of surface temperatures to measure the importance of cold
-var tempMinCold = -13; // Minimum value (in °C) for the monthly average surface temperature (the minimum would correspond to night times)
-var tempMaxCold = 5; // Maximum value (in °C) for the monthly average of average surface temperature
+var tempMinCold = -13; // Minimum value (in °C) for the monthly average day temperature
+var tempMaxCold = 5; // Maximum value (in °C) for the monthly average day temperature from which cold will start icreasing movement costs
 
 var windSpeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE').select('vs')
     .filter(period)
@@ -216,7 +216,7 @@ var looseSand = ee.Image(1)
 /////////LACK OF WATER////////////
 
 // Select a range of surface temperatures to measure the importance of desert conditions
-var tempMin = 26; // Minimum value (in °C) for the monthly average of maximum air temperature from which aridity will add to the cost of movement
+var tempMin = 26; // Minimum value (in °C) for the monthly average of minimum air temperature from which aridity will add to the cost of movement
 var tempMax = 38; // Maxiumu value (in °C) for the monthly average of maximum air temperature.
 
 var heat1 = temp.gte(tempMin); // Values equal or above tempMin = 1, all other values = 0
