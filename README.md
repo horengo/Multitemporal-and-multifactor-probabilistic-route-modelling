@@ -56,6 +56,7 @@ cost surface generation script.
 
 ## For the generation of corridors
 GRASS GIS needs to be installed locally and its grass.bin directory provided within the notebook code. <br>
+The code has been tested with GRASS GIS 8.3 and 8.4 <br>
 Follow the instructions provided within the Jupyter notebook.
 
 
