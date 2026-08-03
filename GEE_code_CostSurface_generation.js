@@ -52,7 +52,7 @@ var DEFAULTS = {
   printSettings: true,
 
   slopeCap: 99.99,
-  snowDivisor: 33.33,
+  snowDivisor: 50,
   seaOccurrence: 90,
 
   damAsset: 'users/hao23/Grand_reservoirs',
