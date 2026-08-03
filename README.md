@@ -6,7 +6,7 @@ The generation of M2PRM requires several steps:
 4. Normalisation of the corridors.
 5. Raster cells stats to join all normalised corridors.
 
-While a Jupyter Notebook with the full algorithm is provided (the requirements file can be used to set up the environment), GEE JavaScript code is also provided for those who prefer to use GEE web-based code editor.
+While a Jupyter Notebook with the full algorithm is provided (the requirements file can be used to set up the environment), GEE JavaScript code with a GUI is also provided for those who prefer to use GEE web-based code editor. The GEE code allows the exploration and visualisation of factors and their cost values.
 Just copy the GEE code, paste it into the code editor and press run.
 
 ## Setting up the environment
