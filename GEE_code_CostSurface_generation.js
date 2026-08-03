@@ -557,7 +557,7 @@ var surfaceWaterBody = makeFactorCard(
   factorsSection,
   'surfaceWater',
   'Surface-water barrier',
-  'JRC Global Surface Water occurrence is used annually; Monthly Recurrence is used for a selected month. Values are converted to approximately 1–4.',
+  'JRC Global Surface Water occurrence is used annually; Monthly Recurrence is used for a selected month. Values are converted to 1–3.',
   false
 );
 parameterRow(surfaceWaterBody, 'surfaceWaterDivisor', 'Water percentage divisor', DEFAULTS.surfaceWaterDivisor,
