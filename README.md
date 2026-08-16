@@ -61,5 +61,5 @@ Follow the instructions provided within the Jupyter notebook.
 
 
 ## Acknowledgements
-Toby C. Wilkinson worked in collaboration with the author in the development of the method. Cameron A. Petrie provided insights and encouragement during the last 8 years, which eventually led to the development of this algorithm. Friederike K. Jürcke proposed the use of the GRanD database to reduce the effects of modern dams and reservoirs.
+Toby C. Wilkinson worked in collaboration with the author in the development of the method. Cameron A. Petrie provided insights and encouragement during the last 8 years, which eventually led to the development of this algorithm. Friederike K. Jürcke proposed the use of the GRanD database to reduce the effects of modern dams and reservoirs. Andrew McLean  contributed to improve the snow and desert costs.
 The Spanish Ministry of Science, Innovation and Universities funded this research with grant ref. PID2023-152402NB-I00 for the project MOVIMIENTO A GRAN ESCALA Y EL ORIGEN DE LAS SOCIEDADES URBANAS (OneWorld).
