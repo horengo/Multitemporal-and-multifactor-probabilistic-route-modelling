@@ -1,5 +1,5 @@
 /*
-  Multi-factor, Probabilistic Route Modelling (MPRM)– GUI
+  Multi-temporal, Multi-factor, Probabilistic Route Modelling (M2PRM)
   Google Earth Engine JavaScript (Code Editor)
  
  
@@ -13,12 +13,14 @@
   4. Press "CALCULATE COST SURFACE".
   5. To export the calculated cost-surface, open Export, choose a resolution,
      and press "CREATE DRIVE EXPORT TASK". Then start the task from the Tasks tab.
+  6. To create a cost profile, open Cost profiles after calculation, draw a
+     line, choose the profile contents and sampling settings, and generate the
+     graph. The sampled table can also be exported as CSV.
  
   IMPORTANT
-  - The GRanD reservoir and loose-sand layers are user assets. Other users must
-    have access to the default assets, replace their IDs, or disable the factors.
-  - This is intended for the Code Editor. Drive exports create tasks, they do
-    not start automatically.
+  - The GRanD reservoir and loose-sand layers are user assets. Users must obtain
+    their own version if the GRanD database, here is only provided for reproducibility.
+  - Drive exports create tasks, they do not start automatically. See point 6 above.
  */
 
 
@@ -132,6 +134,21 @@ var MULTIPLIER_PALETTE = ['313695', '74add1', 'ffffbf', 'f46d43', 'a50026'];
 var appState = {
   nativeScale: null,
   result: null,
+  runId: 0
+};
+
+// State used only by the profile interface. It is deliberately separate from
+// the model state so profile drawing and sampling cannot alter the calculation.
+var profileState = {
+  lineLayer: null,
+  samples: null,
+  bandNames: null,
+  selectors: null,
+  sourceLabel: null,
+  requestedPoints: null,
+  periodName: null,
+  sourceTag: null,
+  samplingScale: null,
   runId: 0
 };
 
@@ -370,6 +387,23 @@ drawingTools.setLinked(false);
 drawingTools.setShown(true);
 drawingTools.setDrawModes(['polygon', 'rectangle']);
 
+function createProfileLineLayer() {
+  profileState.lineLayer = drawingTools.addLayer(
+    [], 'Profile line', '#d73027', true, false
+  );
+  drawingTools.setSelected(null);
+}
+
+function ensureProfileLineLayer() {
+  var layers = drawingTools.layers();
+  var attached = false;
+  var i;
+  for (i = 0; i < layers.length(); i++) {
+    if (layers.get(i) === profileState.lineLayer) attached = true;
+  }
+  if (!attached) createProfileLineLayer();
+}
+
 function resetAnalysisArea() {
   drawingTools.layers().reset([]);
   drawingTools.addLayer([DEFAULT_GEOMETRY], 'Analysis area', '#f46d43', true, false);
@@ -383,6 +417,8 @@ function getAnalysisArea() {
   var i;
   for (i = 0; i < layers.length(); i++) {
     var layer = layers.get(i);
+    // The profile line is a sampling geometry, never part of the analysis AOI.
+    if (layer === profileState.lineLayer) continue;
     if (layer.geometries().length() > 0) {
       features.push(ee.Feature(layer.toGeometry()));
     }
@@ -394,6 +430,7 @@ function getAnalysisArea() {
 }
 
 resetAnalysisArea();
+createProfileLineLayer();
 
 
 // -----------------------------------------------------------------------------
@@ -410,13 +447,13 @@ var sidebar = ui.Panel({
   }
 });
 
-sidebar.add(makeLabel('MPRM COST-SURFACE BUILDER', {
+sidebar.add(makeLabel('M2PRM COST-SURFACE BUILDER', {
   fontSize: '22px',
   fontWeight: 'bold',
   color: '#102a43',
   margin: '0 0 4px 0'
 }));
-sidebar.add(makeLabel('Interface for the generation of multitemporal movement cost-surfaces', {
+sidebar.add(makeLabel('Interface for the generation of multitemporal multi-factor cost-surfaces', {
   fontSize: '13px',
   color: '#486581',
   margin: '0 0 7px 0'
@@ -459,6 +496,11 @@ var resetAoiButton = ui.Button({
   label: 'Reset default area',
   onClick: function() {
     resetAnalysisArea();
+    createProfileLineLayer();
+    drawingTools.stop();
+    drawingTools.setDrawModes(['polygon', 'rectangle']);
+    invalidateProfileResults('The analysis area changed. Recalculate before profiling.');
+    setProfileControlsEnabled(false);
     setStatus('Default analysis area restored.', 'ready');
   },
   style: {stretch: 'horizontal'}
@@ -486,7 +528,7 @@ aoiSection.add(ui.Panel({
 var timeSection = makeSection(
   sidebar,
   '2. Travel period',
-  'Annual and monthly filters retain the exact day-of-year ranges and WorldClim/JRC month identifiers used in the source script.',
+  'Select the month in which travel will take place',
   true
 );
 selectRow(
@@ -515,7 +557,7 @@ var slopeBody = makeFactorCard(
   false
 );
 parameterRow(slopeBody, 'slopeCap', 'Maximum slope cost', DEFAULTS.slopeCap,
-  'Values above this cap are assigned the cap.');
+  'Values above this values are assigned the cap.');
 
 var noWaterBody = makeFactorCard(
   factorsSection,
@@ -557,7 +599,7 @@ var surfaceWaterBody = makeFactorCard(
   factorsSection,
   'surfaceWater',
   'Surface-water barrier',
-  'JRC Global Surface Water occurrence is used annually; Monthly Recurrence is used for a selected month. Values are converted to 1–3.',
+  'JRC Global Surface Water occurrence is used annually. Monthly Recurrence is used for a selected month. Values are converted to 1–3.',
   false
 );
 parameterRow(surfaceWaterBody, 'surfaceWaterDivisor', 'Water percentage divisor', DEFAULTS.surfaceWaterDivisor,
@@ -636,11 +678,11 @@ parameterRow(seaBody, 'seaOccurrence', 'Caspian occurrence threshold (%)', DEFAU
 var outputSection = makeSection(
   sidebar,
   '4. Output and normalisation',
-  'The default Float branch retains the original rounding, 0.0001 scaling and fill value. The 8-bit branch retains 0–255 scaling and a fill value of 255.',
+  'The default Float branch is scaled to 0.0001 and masked-cell fill value of 0.004 to allow large-areas to be calculated without deisproportionately increasing the raster size. The 8-bit branch is scaled to 0–255 and a fill value of 255.',
   true
 );
 parameterRow(outputSection, 'maxCost', 'Global maximum cost', DEFAULTS.maxCost,
-  'The entry is rounded to a whole number, as in the source script; raw values above it are assigned the threshold before output scaling.');
+  'The entry is rounded to a whole number. Raw values above it are assigned the threshold before output scaling.');
 var outputTypeSelect = selectRow(
   outputSection,
   'outputType',
@@ -688,7 +730,7 @@ checkboxRow(diagnosticSection, 'showNoWaterRaw', 'Show raw lack-of-water index',
 var exportSection = makeSection(
   sidebar,
   '6. Export',
-  'This button rebuilds the server-side image from the current controls, so the export cannot silently use stale settings. It creates a task in the Code Editor Tasks tab.',
+  'This button rebuilds the server-side image from the current controls, so the export cannot silently use stale settings. It creates a task in the Code Editor Tasks tab. The user needs to run it for the job to be sent to the server.',
   false
 );
 
@@ -712,6 +754,108 @@ var exportButton = ui.Button({
   }
 });
 exportSection.add(exportButton);
+
+
+// Cost-profile section.
+var profileSection = makeSection(
+  sidebar,
+  '7. Cost profiles',
+  'Calculate the surface first. Then press Draw / replace profile line, click the line vertices on the map and double-click the final vertex. The profile line is kept separate from the analysis polygon and never enters the cost calculation.',
+  false
+);
+
+var profileModeSelect = ui.Select({
+  items: [
+    'Capped combined cost (model units)',
+    'Export raster values',
+    'Combined cost + used factors'
+  ],
+  value: 'Capped combined cost (model units)',
+  style: {stretch: 'horizontal', margin: '1px 4px'}
+});
+profileSection.add(makeLabel('Profile contents', {
+  fontWeight: 'bold',
+  margin: '5px 4px 1px 4px'
+}));
+profileSection.add(profileModeSelect);
+profileSection.add(helpLabel(
+  'Model units show the capped combined cost before Float or 8-bit output scaling. ' +
+  'The factor option but includes only factors used in the calculated surface '
+));
+
+var profilePointSlider = ui.Slider({
+  min: 2,
+  max: 1000,
+  value: 100,
+  step: 1,
+  style: {stretch: 'horizontal', margin: '1px 4px'}
+});
+profileSection.add(makeLabel('Number of regularly spaced sample points', {
+  fontWeight: 'bold',
+  margin: '5px 4px 1px 4px'
+}));
+profileSection.add(profilePointSlider);
+
+var profileScaleBox = ui.Textbox({
+  value: '',
+  style: {stretch: 'horizontal', margin: '1px 4px'}
+});
+profileSection.add(makeLabel('Sampling scale (m)', {
+  fontWeight: 'bold',
+  margin: '5px 4px 1px 4px'
+}));
+profileSection.add(profileScaleBox);
+profileSection.add(helpLabel(
+  'The native AW3D scale is entered automatically. A coarser scale can reduce computation for long profiles.'
+));
+
+var drawProfileButton = ui.Button({
+  label: 'DRAW / REPLACE PROFILE LINE',
+  onClick: startProfileDrawing,
+  disabled: true,
+  style: {stretch: 'horizontal', fontWeight: 'bold', margin: '5px 0 2px 0'}
+});
+var generateProfileButton = ui.Button({
+  label: 'GENERATE PROFILE',
+  onClick: generateCostProfile,
+  disabled: true,
+  style: {
+    stretch: 'horizontal',
+    fontWeight: 'bold',
+    backgroundColor: '#7c3aed',
+    margin: '2px 0'
+  }
+});
+var clearProfileButton = ui.Button({
+  label: 'Clear profile line',
+  onClick: clearProfileLine,
+  style: {stretch: 'horizontal'}
+});
+var profileCsvButton = ui.Button({
+  label: 'CREATE PROFILE CSV TASK',
+  onClick: createProfileCsvTask,
+  disabled: true,
+  style: {stretch: 'horizontal', fontWeight: 'bold', margin: '2px 0'}
+});
+
+profileSection.add(drawProfileButton);
+profileSection.add(generateProfileButton);
+profileSection.add(clearProfileButton);
+profileSection.add(profileCsvButton);
+
+var profileStatusLabel = helpLabel(
+  'Calculate a cost surface to activate the profile tools.'
+);
+profileSection.add(profileStatusLabel);
+
+var profileChartPanel = ui.Panel({
+  style: {
+    shown: false,
+    stretch: 'horizontal',
+    margin: '5px 0 0 0'
+  }
+});
+profileSection.add(profileChartPanel);
 
 
 // Reset and repeated calculate controls.
@@ -884,17 +1028,23 @@ function buildModel(settings, geometry) {
 
   // SNOW.
   if (factorIsNeeded(settings, 'snow')) {
-    var snowBase = ee.ImageCollection('MODIS/061/MOD10A1')
+    var snowCollection = ee.ImageCollection('MODIS/061/MOD10A1')
       .select('NDSI_Snow_Cover')
       .filter(periodFilter)
       .filterBounds(geometry)
+      .map(function(img) {
+        return img.updateMask(img.lte(100));
+      });
+
+    var snowBase = snowCollection
       .reduce(ee.Reducer.mean())
       .unmask(0)
       .clip(geometry);
+
     layers.snow = snowBase.divide(settings.snowDivisor)
       .add(ee.Image(1))
       .rename('snow_multiplier');
-  }
+  } 
 
   // WORLDCLIM DAYTIME TEMPERATURE PROXY: (tavg + tmax) / 2.
   var temperature;
@@ -1048,16 +1198,18 @@ function buildModel(settings, geometry) {
 
   // LOOSE SAND OR DUNES.
   if (factorIsNeeded(settings, 'looseSand')) {
-    var sandProbability = ee.Image(settings.sandAsset)
-      .unmask(0)
+    var sandProbabilityRaw = ee.Image(settings.sandAsset);
+    var sandProbabilityFilled = ee.Image.constant(0)
+      .where(sandProbabilityRaw.mask(), sandProbabilityRaw)
       .clip(geometry);
     layers.looseSand = ee.Image(1)
       .add(
-        sandProbability.gte(settings.sandThreshold)
-          .multiply(sandProbability.multiply(settings.sandCoefficient))
+        sandProbabilityFilled.gte(settings.sandThreshold)
+          .multiply(sandProbabilityFilled.multiply(settings.sandCoefficient))
       )
+      .clip(geometry)
       .rename('loose_sand_multiplier');
-  }
+  } 
 
   // HEIGHT ABOVE THE SELECTED THRESHOLD. Curve coefficients are the established
   // fit to (2000,1), (5050,1.24), and (5600,1.39).
@@ -1339,12 +1491,437 @@ function updateLegend(settings) {
 
 
 // -----------------------------------------------------------------------------
+// COST-PROFILE DRAWING, SAMPLING, CHARTING, AND EXPORT
+// -----------------------------------------------------------------------------
+
+function setProfileStatus(message, kind) {
+  var colors = {
+    ready: '#52606d',
+    working: '#8a4b08',
+    success: '#176b3a',
+    error: '#b42318'
+  };
+  profileStatusLabel.setValue(message);
+  profileStatusLabel.style().set('color', colors[kind] || colors.ready);
+}
+
+function setProfileControlsEnabled(enabled) {
+  drawProfileButton.setDisabled(!enabled);
+  generateProfileButton.setDisabled(!enabled);
+  if (!enabled) profileCsvButton.setDisabled(true);
+}
+
+function removeMapLayersNamed(name) {
+  var layers = appMap.layers();
+  var i;
+  for (i = layers.length() - 1; i >= 0; i--) {
+    if (layers.get(i).getName() === name) {
+      layers.remove(layers.get(i));
+    }
+  }
+}
+
+function invalidateProfileResults(message) {
+  profileState.runId++;
+  profileState.samples = null;
+  profileState.bandNames = null;
+  profileState.selectors = null;
+  profileState.sourceLabel = null;
+  profileState.requestedPoints = null;
+  profileState.periodName = null;
+  profileState.sourceTag = null;
+  profileState.samplingScale = null;
+  profileCsvButton.setDisabled(true);
+  profileChartPanel.clear();
+  profileChartPanel.style().set('shown', false);
+  removeMapLayersNamed('PROFILE sample points');
+  if (message) setProfileStatus(message, 'ready');
+}
+
+function startProfileDrawing() {
+  try {
+    if (!appState.result) {
+      throw new Error('Calculate a cost surface before drawing a profile.');
+    }
+    ensureProfileLineLayer();
+    drawingTools.stop();
+    profileState.lineLayer.geometries().reset([]);
+    invalidateProfileResults();
+    drawingTools.setDrawModes(['line']);
+    drawingTools.setSelected(profileState.lineLayer);
+    // setShape starts interactive drawing mode in the Code Editor.
+    drawingTools.setShape('line');
+    setProfileStatus(
+      'Click the line vertices on the map; double-click the final vertex to finish.',
+      'working'
+    );
+  } catch (error) {
+    setProfileStatus('Profile error: ' + error.message, 'error');
+  }
+}
+
+function clearProfileLine() {
+  ensureProfileLineLayer();
+  drawingTools.stop();
+  profileState.lineLayer.geometries().reset([]);
+  drawingTools.setDrawModes(['polygon', 'rectangle']);
+  drawingTools.setSelected(null);
+  invalidateProfileResults('Profile line and sampled results cleared.');
+}
+
+function getProfileLine() {
+  ensureProfileLineLayer();
+  var geometries = profileState.lineLayer.geometries();
+  if (geometries.length() === 0) {
+    throw new Error('Draw a profile line first.');
+  }
+  return ee.Geometry(geometries.get(geometries.length() - 1));
+}
+
+drawingTools.onDraw(function(geometry, layer) {
+  if (layer !== profileState.lineLayer) return;
+
+  // Retain only the most recently drawn line.
+  while (layer.geometries().length() > 1) {
+    layer.geometries().remove(layer.geometries().get(0));
+  }
+  drawingTools.stop();
+  drawingTools.setDrawModes(['polygon', 'rectangle']);
+  drawingTools.setSelected(null);
+  invalidateProfileResults();
+  setProfileStatus(
+    'Profile line ready. Choose the contents and sampling settings, then generate the profile.',
+    'success'
+  );
+});
+
+drawingTools.onEdit(function(geometry, layer) {
+  if (layer !== profileState.lineLayer) return;
+  invalidateProfileResults();
+  setProfileStatus('Profile line edited. Generate the profile again.', 'ready');
+});
+
+drawingTools.onErase(function(geometry, layer) {
+  if (layer !== profileState.lineLayer) return;
+  invalidateProfileResults('Profile line erased. Draw a new line to continue.');
+});
+
+// Creates regularly spaced points along a user-drawn polyline. This preserves
+// the profile logic of the earlier script while adding explicit coordinates to
+// the CSV output.
+function makePointsAlongLine(line, nPoints) {
+  line = ee.Geometry(line);
+
+  var coords = ee.List(line.coordinates());
+  var nCoords = coords.length();
+  var segmentIds = ee.List.sequence(0, nCoords.subtract(2));
+
+  var rawSegments = ee.FeatureCollection(segmentIds.map(function(i) {
+    i = ee.Number(i);
+    var c1 = ee.List(coords.get(i));
+    var c2 = ee.List(coords.get(i.add(1)));
+    var p1 = ee.Geometry.Point(c1);
+    var p2 = ee.Geometry.Point(c2);
+    var segmentLength = p1.distance(p2, 1);
+
+    return ee.Feature(null, {
+      segment_id: i,
+      x1: c1.get(0),
+      y1: c1.get(1),
+      x2: c2.get(0),
+      y2: c2.get(1),
+      segment_length_m: segmentLength
+    });
+  })).filter(ee.Filter.gt('segment_length_m', 0));
+
+  var initial = ee.Dictionary({
+    cumulative: ee.Number(0),
+    features: ee.List([])
+  });
+
+  var cumulativeSegments = ee.Dictionary(
+    rawSegments.toList(rawSegments.size()).iterate(function(feature, state) {
+      feature = ee.Feature(feature);
+      state = ee.Dictionary(state);
+
+      var startDistance = ee.Number(state.get('cumulative'));
+      var segmentLength = ee.Number(feature.get('segment_length_m'));
+      var endDistance = startDistance.add(segmentLength);
+      var newFeature = feature.set({
+        start_m: startDistance,
+        end_m: endDistance
+      });
+
+      return ee.Dictionary({
+        cumulative: endDistance,
+        features: ee.List(state.get('features')).add(newFeature)
+      });
+    }, initial)
+  );
+
+  var segmentCollection = ee.FeatureCollection(
+    ee.List(cumulativeSegments.get('features'))
+  );
+  var totalLength = ee.Number(cumulativeSegments.get('cumulative'));
+  var n = ee.Number(nPoints);
+  var stepDistance = totalLength.divide(n.subtract(1));
+  var epsilon = ee.Number(0.001);
+  var maxLookupDistance = ee.Number(
+    ee.Algorithms.If(
+      totalLength.gt(epsilon),
+      totalLength.subtract(epsilon),
+      totalLength
+    )
+  );
+
+  var pointIds = ee.List.sequence(0, n.subtract(1));
+  return ee.FeatureCollection(pointIds.map(function(i) {
+    i = ee.Number(i);
+    var distanceAlongLine = i.multiply(stepDistance);
+    var lookupDistance = distanceAlongLine.min(maxLookupDistance);
+    var matchingSegments = segmentCollection
+      .filter(ee.Filter.lte('start_m', lookupDistance))
+      .filter(ee.Filter.gt('end_m', lookupDistance));
+    var segment = ee.Feature(
+      ee.Algorithms.If(
+        matchingSegments.size().gt(0),
+        matchingSegments.first(),
+        segmentCollection.sort('start_m', false).first()
+      )
+    );
+
+    var segmentStart = ee.Number(segment.get('start_m'));
+    var segmentLength = ee.Number(segment.get('segment_length_m'));
+    var fraction = lookupDistance.subtract(segmentStart).divide(segmentLength);
+    var x1 = ee.Number(segment.get('x1'));
+    var y1 = ee.Number(segment.get('y1'));
+    var x2 = ee.Number(segment.get('x2'));
+    var y2 = ee.Number(segment.get('y2'));
+    var x = x1.add(x2.subtract(x1).multiply(fraction));
+    var y = y1.add(y2.subtract(y1).multiply(fraction));
+
+    return ee.Feature(ee.Geometry.Point([x, y]), {
+      point_id: i.add(1),
+      distance_m: distanceAlongLine,
+      distance_km: distanceAlongLine.divide(1000),
+      longitude: x,
+      latitude: y
+    });
+  }));
+}
+
+function getProfileDefinition(result, selectedMode) {
+  if (selectedMode === 'Export raster values') {
+    return {
+      image: result.output.rename('OutputCost').float(),
+      bandNames: ['OutputCost'],
+      title: 'Export raster cost values',
+      yAxis: 'Export raster value',
+      tag: 'output'
+    };
+  }
+
+  var images = [result.cappedCost.rename('FinalCost')];
+  var bandNames = ['FinalCost'];
+
+  if (selectedMode === 'Combined cost + used factors') {
+    var factorDefinitions = [
+      {key: 'slope', name: 'SlopeMultiplier', image: result.layers.slope},
+      {key: 'noWater', name: 'LackOfWaterMultiplier', image: result.layers.noWater},
+      {key: 'waterAttraction', name: 'WaterAttractionMultiplier', image: result.layers.waterAttraction},
+      {key: 'surfaceWater', name: 'SurfaceWaterMultiplier', image: result.layers.surfaceWater},
+      {key: 'snow', name: 'SnowMultiplier', image: result.layers.snow},
+      {key: 'looseSand', name: 'LooseSandMultiplier', image: result.layers.looseSand},
+      {key: 'cold', name: 'ColdMultiplier', image: result.layers.cold},
+      {key: 'height', name: 'AltitudeMultiplier', image: result.layers.height},
+      {key: 'reservoirs', name: 'ReservoirReplacement', image: result.layers.reservoirs},
+      {key: 'sea', name: 'SeaCost', image: result.layers.sea}
+    ];
+    var i;
+    for (i = 0; i < factorDefinitions.length; i++) {
+      var definition = factorDefinitions[i];
+      if (result.settings.factors[definition.key].use && definition.image) {
+        images.push(definition.image.rename(definition.name));
+        bandNames.push(definition.name);
+      }
+    }
+  }
+
+  return {
+    image: ee.Image.cat(images).float(),
+    bandNames: bandNames,
+    title: selectedMode,
+    yAxis: bandNames.length === 1 ? 'Combined cost' : 'Cost / multiplier value',
+    tag: bandNames.length === 1 ? 'combined' : 'combined_factors'
+  };
+}
+
+function generateCostProfile() {
+  var profileRun = ++profileState.runId;
+  generateProfileButton.setDisabled(true);
+  setProfileStatus('Preparing profile points and chart…', 'working');
+
+  try {
+    if (!appState.result) {
+      throw new Error('Calculate a cost surface before generating a profile.');
+    }
+    var result = appState.result;
+    var line = getProfileLine();
+    var nPoints = Math.round(profilePointSlider.getValue());
+    var scaleText = String(profileScaleBox.getValue() || '').trim();
+    var samplingScale = Number(scaleText);
+    if (scaleText === '' || !isFinite(samplingScale) || samplingScale <= 0) {
+      throw new Error('Sampling scale must be a number greater than zero.');
+    }
+
+    var selectedMode = profileModeSelect.getValue();
+    var profileDefinition = getProfileDefinition(result, selectedMode);
+    var periodName = result.settings.period.name;
+    var pointProperties = [
+      'point_id', 'distance_m', 'distance_km', 'longitude', 'latitude',
+      'period', 'profile_source', 'sampling_scale_m'
+    ];
+    var profilePoints = makePointsAlongLine(line, nPoints).map(function(feature) {
+      return feature.set({
+        period: periodName,
+        profile_source: selectedMode,
+        sampling_scale_m: samplingScale
+      });
+    });
+
+    var sampledValues = profileDefinition.image.sampleRegions({
+      collection: profilePoints,
+      properties: pointProperties,
+      scale: samplingScale,
+      projection: result.projection,
+      tileScale: 4,
+      geometries: true
+    }).sort('distance_m');
+
+    profileState.samples = sampledValues;
+    profileState.bandNames = profileDefinition.bandNames.slice();
+    profileState.selectors = pointProperties.concat(profileState.bandNames);
+    profileState.sourceLabel = selectedMode;
+    profileState.requestedPoints = nPoints;
+    profileState.periodName = periodName;
+    profileState.sourceTag = profileDefinition.tag;
+    profileState.samplingScale = samplingScale;
+
+    removeMapLayersNamed('PROFILE sample points');
+    appMap.addLayer(
+      profilePoints,
+      {color: 'ffff00'},
+      'PROFILE sample points',
+      true
+    );
+
+    var chart = ui.Chart.feature.byFeature({
+      features: sampledValues,
+      xProperty: 'distance_km',
+      yProperties: profileDefinition.bandNames
+    })
+      .setChartType('LineChart')
+      .setOptions({
+        title: profileDefinition.title + ' – ' + periodName,
+        hAxis: {title: 'Distance along line (km)'},
+        vAxis: {title: profileDefinition.yAxis},
+        lineWidth: 2,
+        pointSize: 2,
+        interpolateNulls: false,
+        legend: {
+          position: profileDefinition.bandNames.length === 1 ? 'none' : 'bottom'
+        }
+      });
+    chart.style().set({height: '300px', stretch: 'horizontal'});
+    profileChartPanel.clear();
+    profileChartPanel.add(chart);
+    profileChartPanel.style().set('shown', true);
+
+    print('Cost-profile sampled values', sampledValues);
+    print('Cost-profile band names', profileDefinition.bandNames);
+
+    profileCsvButton.setDisabled(false);
+    sampledValues.size().evaluate(function(count, error) {
+      if (profileRun !== profileState.runId) return;
+      generateProfileButton.setDisabled(false);
+      if (error) {
+        profileCsvButton.setDisabled(true);
+        setProfileStatus(
+          'Earth Engine could not sample the profile: ' + (error.message || error),
+          'error'
+        );
+      } else if (count === 0) {
+        profileCsvButton.setDisabled(true);
+        setProfileStatus(
+          'No raster values were returned. Keep the line inside the calculated analysis area.',
+          'error'
+        );
+      } else {
+        var omitted = nPoints - count;
+        var omissionText = omitted > 0 ?
+          ' ' + omitted + ' requested point(s) intersected masked or out-of-area cells.' : '';
+        setProfileStatus(
+          'Profile generated from ' + count + ' sampled point(s).' + omissionText +
+          ' The graph is shown above and the table is in the Console.',
+          'success'
+        );
+      }
+    });
+  } catch (error) {
+    generateProfileButton.setDisabled(false);
+    setProfileStatus('Profile error: ' + error.message, 'error');
+  }
+}
+
+function createProfileCsvTask() {
+  try {
+    if (!profileState.samples || !profileState.selectors) {
+      throw new Error('Generate a profile before creating its CSV export.');
+    }
+    var description = (
+      'cost_profile_' + profileState.periodName + '_' + profileState.sourceTag + '_' +
+      profileState.requestedPoints + 'pts'
+    ).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
+    var folder = readText('exportFolder', 'Google Drive folder', false);
+    var exportParameters = {
+      collection: profileState.samples,
+      description: description,
+      fileNamePrefix: description,
+      fileFormat: 'CSV',
+      selectors: profileState.selectors
+    };
+    if (folder !== '') exportParameters.folder = folder;
+
+    Export.table.toDrive(exportParameters);
+    print('Profile CSV export task: ' + description, {
+      period: profileState.periodName,
+      profile_source: profileState.sourceLabel,
+      requested_points: profileState.requestedPoints,
+      sampling_scale_m: profileState.samplingScale,
+      folder: folder === '' ? '(Drive root)' : folder
+    });
+    setProfileStatus(
+      'Profile CSV task "' + description + '" created. Open the Tasks tab and click RUN.',
+      'success'
+    );
+  } catch (error) {
+    setProfileStatus('Profile export error: ' + error.message, 'error');
+  }
+}
+
+
+// -----------------------------------------------------------------------------
 // 8. USER ACTIONS
 // -----------------------------------------------------------------------------
 
 function calculateAndDisplay() {
   var currentRun = ++appState.runId;
   calculateButton.setDisabled(true);
+  drawingTools.stop();
+  drawingTools.setDrawModes(['polygon', 'rectangle']);
+  drawingTools.setSelected(null);
+  setProfileControlsEnabled(false);
+  invalidateProfileResults('Recalculating the surface; existing profile results were cleared.');
   setStatus('Building the Earth Engine calculation and map layers…', 'working');
 
   try {
@@ -1355,7 +1932,7 @@ function calculateAndDisplay() {
     renderResult(result);
 
     if (settings.printSettings) {
-      print('MPRM GUI settings (' + settings.period.name + ')', settings);
+      print('M2PRM GUI settings (' + settings.period.name + ')', settings);
       print('Final cost image', result.output);
     }
 
@@ -1365,12 +1942,20 @@ function calculateAndDisplay() {
       if (currentRun !== appState.runId) return;
       calculateButton.setDisabled(false);
       if (error) {
+        appState.result = null;
+        setProfileControlsEnabled(false);
+        setProfileStatus('Calculate a valid surface before profiling.', 'error');
         setStatus(
           'Earth Engine could not prepare the surface. Check asset access and the Console error: ' +
           (error.message || error),
           'error'
         );
       } else {
+        setProfileControlsEnabled(true);
+        setProfileStatus(
+          'Surface ready. Draw or edit a profile line, then generate the graph.',
+          'ready'
+        );
         setStatus(
           'Cost surface prepared for ' + settings.period.name + '. ' +
           'Rendering may take time for a large area; use the Layers control to inspect factors.',
@@ -1380,6 +1965,9 @@ function calculateAndDisplay() {
     });
   } catch (error) {
     calculateButton.setDisabled(false);
+    appState.result = null;
+    setProfileControlsEnabled(false);
+    setProfileStatus('Calculate a valid surface before profiling.', 'error');
     setStatus('Settings error: ' + error.message, 'error');
   }
 }
@@ -1453,6 +2041,14 @@ function restoreDefaults() {
   }
   floatOptionsPanel.style().set('shown', true);
   appState.result = null;
+  profileModeSelect.setValue('Capped combined cost (model units)');
+  profilePointSlider.setValue(100);
+  profileScaleBox.setValue(
+    appState.nativeScale === null ? '' : String(appState.nativeScale)
+  );
+  clearProfileLine();
+  setProfileControlsEnabled(false);
+  setProfileStatus('Calculate a cost surface to activate the profile tools.', 'ready');
   setStatus('All model and display controls restored to the established defaults.', 'ready');
 }
 
@@ -1474,11 +2070,12 @@ function initialiseNativeResolution() {
     }
     appState.nativeScale = Math.round(scale * 10000) / 10000;
     controls.outputResolution.setValue(String(appState.nativeScale));
+    profileScaleBox.setValue(String(appState.nativeScale));
     nativeScaleLabel.setValue(
       'Native AW3D resolution: ' + appState.nativeScale.toFixed(4) + ' m.'
     );
     exportButton.setDisabled(false);
-    setStatus('Ready. Review the controls and calculate the cost surface.', 'ready');
+    setStatus('Review the controls and calculate the cost surface.', 'ready');
   });
 }
 
