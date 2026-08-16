@@ -609,7 +609,7 @@ var snowBody = makeFactorCard(
   factorsSection,
   'snow',
   'Snow cover',
-  'Mean MODIS MOD10A1 NDSI snow cover for the selected day-of-year period, converted to approximately 1–4.',
+  'Mean MODIS MOD10A1 NDSI snow cover for the selected day-of-year period, converted to approximately 1–3.',
   false
 );
 parameterRow(snowBody, 'snowDivisor', 'Snow percentage divisor', DEFAULTS.snowDivisor,
